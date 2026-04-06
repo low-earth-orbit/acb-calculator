@@ -10,42 +10,115 @@ def get_csv_files(folder="data"):
     return sorted(csv_files)
 
 
-def get_symbols(csv_file):
-    """Extract unique symbols from BUY trades in the CSV file."""
+def parse_file_selection(selection, csv_files, folder="data"):
+    """Parse CSV file selection input into one or more file paths."""
+    if not selection:
+        return [os.path.join(folder, name) for name in csv_files]
+
+    selected_paths = []
+    for part in selection.split(","):
+        part = part.strip()
+        if not part:
+            continue
+
+        if part.isdigit():
+            index = int(part) - 1
+            if 0 <= index < len(csv_files):
+                selected_paths.append(os.path.join(folder, csv_files[index]))
+            else:
+                raise ValueError(f"Index {part} is outside the available file range.")
+        elif "-" in part and part.replace("-", "").isdigit():
+            start, end = map(int, part.split("-", 1))
+            if start < 1 or end < 1 or start > len(csv_files) or end > len(csv_files):
+                raise ValueError(f"Range {part} is outside the available file range.")
+            if start > end:
+                raise ValueError(
+                    f"Range start must be less than or equal to end: {part}"
+                )
+            for index in range(start - 1, end):
+                selected_paths.append(os.path.join(folder, csv_files[index]))
+        else:
+            candidate = part
+            if not os.path.isabs(candidate):
+                candidate = os.path.join(folder, candidate)
+            selected_paths.append(candidate)
+
+    if not selected_paths:
+        raise ValueError("No valid files selected.")
+    return selected_paths
+
+
+def safe_float(value):
+    return float(value or 0.0)
+
+
+def get_year_from_date(date_str):
+    if not date_str:
+        return "unknown"
+    year = date_str.strip().split("-")[0]
+    return year if year.isdigit() else "unknown"
+
+
+def get_years_from_csv_paths(csv_paths):
+    years = set()
+    for csv_path in csv_paths:
+        with open(csv_path, "r") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                date_str = row.get("transaction_date") or row.get("settlement_date")
+                if date_str and date_str.strip():
+                    year = get_year_from_date(date_str)
+                    if year != "unknown":
+                        years.add(year)
+    if not years:
+        return ["unknown"]
+    return sorted(years, key=lambda y: int(y) if y.isdigit() else float("inf"))
+
+
+def get_symbols(csv_paths):
+    """Extract unique BUY symbols from one or more CSV files."""
     symbols = set()
-    with open(csv_file, "r") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            if (
-                row["activity_type"] == "Trade"
-                and row["activity_sub_type"] == "BUY"
-                and row["symbol"]
-            ):
-                symbols.add(row["symbol"])
-    return sorted(list(symbols))
+    for csv_path in csv_paths:
+        with open(csv_path, "r") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                if (
+                    row.get("activity_type") == "Trade"
+                    and row.get("activity_sub_type") == "BUY"
+                    and row.get("symbol")
+                ):
+                    symbols.add(row["symbol"].strip())
+    return sorted(symbols)
 
 
-def calculate_acb(csv_file, symbol):
+def calculate_acb(csv_paths, symbol):
     total_acb = 0.0
     total_shares = 0.0
     total_interest = 0.0
-    with open(csv_file, "r") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            if (
-                row["activity_type"] == "Trade"
-                and row["activity_sub_type"] == "BUY"
-                and row["symbol"] == symbol
-            ):
-                quantity = float(row["quantity"])
-                unit_price = float(row["unit_price"])
-                commission = float(row["commission"])
-                cost = quantity * unit_price + commission
-                total_acb += cost
-                total_shares += quantity
-            elif row["activity_type"] == "InterestCharged":
-                total_interest += float(row["net_cash_amount"])
-    return total_acb, total_shares, total_interest
+    interest_by_year = {}
+
+    for csv_path in csv_paths:
+        with open(csv_path, "r") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                if (
+                    row.get("activity_type") == "Trade"
+                    and row.get("activity_sub_type") == "BUY"
+                ):
+                    if row.get("symbol") == symbol:
+                        quantity = safe_float(row.get("quantity"))
+                        net_cash_amount = abs(safe_float(row.get("net_cash_amount")))
+                        total_acb += net_cash_amount
+                        total_shares += quantity
+                elif row.get("activity_type") == "InterestCharged":
+                    interest = safe_float(row.get("net_cash_amount"))
+                    total_interest += interest
+                    year = get_year_from_date(
+                        row.get("transaction_date") or row.get("settlement_date")
+                    )
+                    interest_by_year[year] = interest_by_year.get(year, 0.0) + interest
+
+    return total_acb, total_shares, total_interest, interest_by_year
 
 
 if __name__ == "__main__":
@@ -53,32 +126,32 @@ if __name__ == "__main__":
 
     if csv_files:
         print("Available CSV files in data folder:")
-        for i, f in enumerate(csv_files, 1):
-            print(f"  {i}. {f}")
-
-        choice = input(
-            f"Select a file (1-{len(csv_files)}) or enter a custom path [default: 1]: "
-        ).strip()
-        if not choice:
-            choice = "1"
-        try:
-            index = int(choice) - 1
-            if 0 <= index < len(csv_files):
-                csv_file = os.path.join("data", csv_files[index])
-            else:
-                print(f"Error: Please select a number between 1 and {len(csv_files)}.")
-                exit(1)
-        except ValueError:
-            csv_file = choice
+        for i, filename in enumerate(csv_files, 1):
+            print(f"  {i}. {filename}")
+        print(
+            "\nPress Enter to use all available files, or select one or more files by comma-separated index or range (for example: 1,3-4)."
+        )
+        selection = input(f"Select file(s) [default: all]: ").strip()
     else:
-        csv_file = input(
-            "No CSV files found in data folder. Enter the path to the data file: "
+        print("No CSV files found in the data folder.")
+        selection = input(
+            "Enter one or more CSV file paths separated by commas: "
         ).strip()
 
     try:
-        symbols = get_symbols(csv_file)
+        csv_paths = parse_file_selection(selection, csv_files)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        exit(1)
+
+    print("\nSelected files:")
+    for path in csv_paths:
+        print(f"  {path}")
+
+    try:
+        symbols = get_symbols(csv_paths)
         if not symbols:
-            print("No BUY trades found in the file.")
+            print("No BUY trades found in the selected file(s).")
             exit(1)
 
         print("\nAvailable symbols:")
@@ -87,39 +160,70 @@ if __name__ == "__main__":
 
         choice = input(f"Select a symbol (1-{len(symbols)}) [default: 1]: ").strip()
         if not choice:
-            choice = "1"
-        try:
-            index = int(choice) - 1
-            if 0 <= index < len(symbols):
-                symbol = symbols[index]
-            else:
-                print(f"Error: Please select a number between 1 and {len(symbols)}.")
-                exit(1)
-        except ValueError:
-            print("Error: Invalid input.")
-            exit(1)
+            symbol = symbols[0]
+        else:
+            try:
+                index = int(choice) - 1
+                if 0 <= index < len(symbols):
+                    symbol = symbols[index]
+                else:
+                    print(
+                        f"Error: Please select a number between 1 and {len(symbols)}."
+                    )
+                    exit(1)
+            except ValueError:
+                if choice in symbols:
+                    symbol = choice
+                else:
+                    print(
+                        "Error: Invalid input. Enter a symbol index or exact symbol name."
+                    )
+                    exit(1)
 
-        calculated_acb, total_shares, total_interest = calculate_acb(csv_file, symbol)
+        calculated_acb, total_shares, total_interest, interest_by_year = calculate_acb(
+            csv_paths, symbol
+        )
+
         print(f"\nSymbol: {symbol}")
-        print(f"ACB calculated from trades: {calculated_acb:.2f}")
+        print(f"Book cost: {calculated_acb:.2f}")
         print(f"Total shares: {total_shares:.4f}")
-        print(f"Total interest charged (entire account): {total_interest:.2f}")
-    except FileNotFoundError:
-        print(f"Error: File '{csv_file}' not found.")
+        if interest_by_year:
+            print("Interest charged by year:")
+            for year in sorted(
+                interest_by_year,
+                key=lambda y: int(y) if y.isdigit() else y,
+            ):
+                print(f"  {year}: {interest_by_year[year]:.2f}")
+        # print(f"Total interest charged: {total_interest:.2f}")
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
         exit(1)
 
     try:
-        box21_input = input(
-            f"Enter box 21 amount on T3 for {symbol} [default: 0]: "
-        ).strip()
-        box21 = float(box21_input) if box21_input else 0.0
-        box42_input = input(
-            f"Enter box 42 amount on T3 for {symbol} [default: 0]: "
-        ).strip()
-        box42 = float(box42_input) if box42_input else 0.0
-        adjusted_acb = calculated_acb + box21 - box42
-        acb_per_share = adjusted_acb / total_shares if total_shares > 0 else 0
-        print(f"ACB: {adjusted_acb:.2f}")
+        years = get_years_from_csv_paths(csv_paths)
+        box21_total = 0.0
+        box42_total = 0.0
+
+        print(
+            "\nEnter T3 box 21 and box 42 amounts for each tax year in the selected file set."
+        )
+        for year in years:
+            box21_input = input(
+                f"Enter box 21 amount on T3 for {symbol} in {year} [default: 0]: "
+            ).strip()
+            box21_year = float(box21_input) if box21_input else 0.0
+            box21_total += box21_year
+
+            box42_input = input(
+                f"Enter box 42 amount on T3 for {symbol} in {year} [default: 0]: "
+            ).strip()
+            box42_year = float(box42_input) if box42_input else 0.0
+            box42_total += box42_year
+
+        adjusted_acb = calculated_acb + box21_total - box42_total
+        acb_per_share = adjusted_acb / total_shares if total_shares > 0 else 0.0
+
+        print(f"\nACB: {adjusted_acb:.2f}")
         print(f"ACB per share: {acb_per_share:.2f}")
     except ValueError:
-        print("Invalid input. Please enter numeric values.")
+        print("Invalid numeric input. Please enter numbers for boxes 21 and 42.")
