@@ -1,5 +1,6 @@
 import csv
 import os
+from datetime import datetime
 
 
 def get_csv_files(folder="data"):
@@ -204,21 +205,27 @@ if __name__ == "__main__":
         box21_total = 0.0
         box42_total = 0.0
 
-        print(
-            "\nEnter T3 box 21 and box 42 amounts for each tax year in the selected file set."
-        )
-        for year in years:
-            box21_input = input(
-                f"Enter box 21 amount on T3 for {symbol} in {year} [default: 0]: "
-            ).strip()
-            box21_year = float(box21_input) if box21_input else 0.0
-            box21_total += box21_year
+        current_year = datetime.now().year
+        past_years = [y for y in years if int(y) < current_year]
 
-            box42_input = input(
-                f"Enter box 42 amount on T3 for {symbol} in {year} [default: 0]: "
-            ).strip()
-            box42_year = float(box42_input) if box42_input else 0.0
-            box42_total += box42_year
+        if past_years:
+            print("\nEnter T3 box 21 and box 42 amounts for each completed tax year.")
+            for year in past_years:
+                box21_input = input(
+                    f"Enter box 21 amount on T3 for {symbol} in {year} [default: 0]: "
+                ).strip()
+                box21_year = float(box21_input) if box21_input else 0.0
+                box21_total += box21_year
+
+                box42_input = input(
+                    f"Enter box 42 amount on T3 for {symbol} in {year} [default: 0]: "
+                ).strip()
+                box42_year = float(box42_input) if box42_input else 0.0
+                box42_total += box42_year
+        else:
+            print(
+                f"\nNo completed tax years to adjust (current year is {current_year})."
+            )
 
         adjusted_acb = calculated_acb + box21_total - box42_total
         acb_per_share = adjusted_acb / total_shares if total_shares > 0 else 0.0
