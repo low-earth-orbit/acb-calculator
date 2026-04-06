@@ -97,29 +97,63 @@ def calculate_acb(csv_paths, symbol):
     total_shares = 0.0
     total_interest = 0.0
     interest_by_year = {}
+    capital_gains_by_year = {}
 
+    all_rows = []
     for csv_path in csv_paths:
         with open(csv_path, "r") as file:
             reader = csv.DictReader(file)
             for row in reader:
-                if (
-                    row.get("activity_type") == "Trade"
-                    and row.get("activity_sub_type") == "BUY"
-                ):
-                    if row.get("symbol") == symbol:
-                        quantity = safe_float(row.get("quantity"))
-                        net_cash_amount = abs(safe_float(row.get("net_cash_amount")))
-                        total_acb += net_cash_amount
-                        total_shares += quantity
-                elif row.get("activity_type") == "InterestCharged":
-                    interest = safe_float(row.get("net_cash_amount"))
-                    total_interest += interest
+                all_rows.append(row)
+
+    all_rows.sort(
+        key=lambda r: r.get("transaction_date") or r.get("settlement_date") or ""
+    )
+
+    for row in all_rows:
+        if (
+            row.get("activity_type") == "Trade"
+            and row.get("activity_sub_type") == "BUY"
+        ):
+            if row.get("symbol") == symbol:
+                quantity = safe_float(row.get("quantity"))
+                net_cash_amount = abs(safe_float(row.get("net_cash_amount")))
+                total_acb += net_cash_amount
+                total_shares += quantity
+        elif (
+            row.get("activity_type") == "Trade"
+            and row.get("activity_sub_type") == "SELL"
+        ):
+            if row.get("symbol") == symbol:
+                quantity = safe_float(row.get("quantity"))
+                proceeds = abs(safe_float(row.get("net_cash_amount")))
+                if total_shares > 0:
+                    avg_cost_per_share = total_acb / total_shares
+                    cost_basis = quantity * avg_cost_per_share
+                    capital_gain = proceeds - cost_basis
+                    total_acb -= cost_basis
+                    total_shares -= quantity
                     year = get_year_from_date(
                         row.get("transaction_date") or row.get("settlement_date")
                     )
-                    interest_by_year[year] = interest_by_year.get(year, 0.0) + interest
+                    capital_gains_by_year[year] = (
+                        capital_gains_by_year.get(year, 0.0) + capital_gain
+                    )
+        elif row.get("activity_type") == "InterestCharged":
+            interest = safe_float(row.get("net_cash_amount"))
+            total_interest += interest
+            year = get_year_from_date(
+                row.get("transaction_date") or row.get("settlement_date")
+            )
+            interest_by_year[year] = interest_by_year.get(year, 0.0) + interest
 
-    return total_acb, total_shares, total_interest, interest_by_year
+    return (
+        total_acb,
+        total_shares,
+        total_interest,
+        interest_by_year,
+        capital_gains_by_year,
+    )
 
 
 if __name__ == "__main__":
@@ -181,9 +215,13 @@ if __name__ == "__main__":
                     )
                     exit(1)
 
-        calculated_acb, total_shares, total_interest, interest_by_year = calculate_acb(
-            csv_paths, symbol
-        )
+        (
+            calculated_acb,
+            total_shares,
+            total_interest,
+            interest_by_year,
+            capital_gains_by_year,
+        ) = calculate_acb(csv_paths, symbol)
 
         print(f"\nSymbol: {symbol}")
         print(f"Book cost: {calculated_acb:.2f}")
@@ -195,7 +233,15 @@ if __name__ == "__main__":
                 key=lambda y: int(y) if y.isdigit() else y,
             ):
                 print(f"  {year}: {interest_by_year[year]:.2f}")
-        # print(f"Total interest charged: {total_interest:.2f}")
+        if capital_gains_by_year:
+            print("Capital gains/losses by year:")
+            for year in sorted(
+                capital_gains_by_year,
+                key=lambda y: int(y) if y.isdigit() else y,
+            ):
+                gain = capital_gains_by_year[year]
+                label = "gain" if gain >= 0 else "loss"
+                print(f"  {year}: {gain:.2f} ({label})")
     except FileNotFoundError as exc:
         print(f"Error: {exc}")
         exit(1)
