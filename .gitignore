@@ -1,6 +1,9 @@
 # Source data folder
 data
 
+# Output folder
+output
+
 # MacOS system file
 .DS_Store
 

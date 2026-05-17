@@ -1,23 +1,39 @@
-# ACB Calculator
+# Personal Finance Tools
 
-## Wealthsimple
+Small Python tools for personal finance analysis.
 
-Calculates the adjusted cost base (ACB) for securities from Wealthsimple activity exports.
+## ACB Calculator
 
-### Usage
+Location: `acb-calculator/`
+
+Calculates adjusted cost base (ACB) for Wealthsimple activity exports.
 
 ```bash
+cd acb-calculator
 python acb-wealthsimple.py
 ```
 
-### Process
+See `acb-calculator/README.md` for details.
 
-1. Select one or more CSV files from the `data/` folder by index, or press Enter to use all available CSV files.
-2. Select a security symbol from the aggregated file set.
-3. Enter T3 box 21 and box 42 amounts by year, starting with the earliest tax year.
-4. Get results: adjusted ACB and ACB per share.
+## Credit Card Statement Analyzer
 
-### Notes
+Location: `credit-card-statement-analyzer/`
 
-- This tool is Wealthsimple-specific and reads Wealthsimple activity export CSVs.
-- Default behavior uses all CSV files in `data/` for multi-year aggregation.
+Summarizes Visa credit card statement CSV expenses by editable categories.
+
+```bash
+cd credit-card-statement-analyzer
+python credit-card.py
+```
+
+Useful options:
+
+```bash
+python credit-card.py --details
+python credit-card.py --uncategorized
+python credit-card.py --output output/category-totals.csv
+```
+
+Categories are controlled by `credit-card-statement-analyzer/category_rules.json`.
+
+See `credit-card-statement-analyzer/README.md` for details.
